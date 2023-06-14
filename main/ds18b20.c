@@ -324,10 +324,12 @@ int16_t calculateTemperature(const DeviceAddress *deviceAddress, uint8_t *scratc
 	int16_t fpTemperature = (((int16_t)scratchPad[TEMP_MSB]) << 11) | (((int16_t)scratchPad[TEMP_LSB]) << 3);
 	return fpTemperature;
 }
-
 // Returns temperature from sensor
-float ds18b20_get_temp(void)
+Ds18b20GetTemp ds18b20_get_temp(void)
 {
+	Ds18b20GetTemp ret;
+	ret.isWorking = 0;
+	ret.temp = 0;
 	if (init == 1)
 	{
 		unsigned char check;
@@ -346,17 +348,11 @@ float ds18b20_get_temp(void)
 			check = ds18b20_RST_PULSE();
 			float temp = 0;
 			temp = (float)(temp1 + (temp2 * 256)) / 16;
-			return temp;
-		}
-		else
-		{
-			return 0;
+			ret.isWorking = 1;
+			ret.temp = temp;
 		}
 	}
-	else
-	{
-		return 0;
-	}
+	return ret;
 }
 
 void ds18b20_init(int GPIO)

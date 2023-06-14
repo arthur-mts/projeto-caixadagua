@@ -23,89 +23,85 @@
 #include "driver/gpio.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
-#include "ds18b20.c" //Include library
+#include "esp_log.h"
+#include "ds18b20.h" //Include library
 #define DS_GPIO 3    // GPIO where you connected ds18b20
 #define TRIGGER_PIN 0
 #define ECHO_PIN 1
+#define TAG "CAIXA DAGUA"
+
+struct HcSR04GetDist
+{
+  int isWorking;
+  float distance;
+};
+typedef struct HcSR04GetDist HcSR04GetDist;
+
+Ds18b20GetTemp tempData;
+HcSR04GetDist distData = { 0, 0 };
+
 
 void measure_distance(void *pvParameters) {
-  gpio_pad_select_gpio(TRIGGER_PIN);
-  gpio_set_direction(TRIGGER_PIN, GPIO_MODE_OUTPUT );
-
-  gpio_pad_select_gpio(ECHO_PIN);
-  gpio_set_direction(ECHO_PIN, GPIO_MODE_INPUT);
-
-
   while(1) {
     gpio_set_level(TRIGGER_PIN, 1);
     ets_delay_us(10);
     gpio_set_level(TRIGGER_PIN, 0);
 
+    uint64_t start_time_check = esp_timer_get_time();
+    distData.isWorking = 1;
 
-    while(gpio_get_level(ECHO_PIN) == 0)
-    ;
+    while(gpio_get_level(ECHO_PIN) == 0) {
+      if((esp_timer_get_time() - start_time_check) >= 500) {
+        distData.isWorking = 0;
+        goto continue_parent_loop;
+      }
+    }
 
     uint64_t start_time = esp_timer_get_time();
-    while(gpio_get_level(ECHO_PIN) == 1)
-    ;
+    while(gpio_get_level(ECHO_PIN) == 1) {
+      if((esp_timer_get_time() - start_time_check) >= 500) {
+        distData.isWorking = 0;
+        goto continue_parent_loop;
+      }
+    }
+
     uint64_t end_time = esp_timer_get_time();
 
     float time_diff = (float) end_time - start_time;
     float distance = time_diff / 58.0;
-    printf("Distancia: %0.1fcm\n", distance);
+    distData.isWorking = 1;
+    distData.distance = distance;
+    continue_parent_loop:
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
 
 void measure_temp(void *pvParameters)
 {
-  
   ds18b20_init(DS_GPIO);
   while (1)
   {
 
-    float temperatura = ds18b20_get_temp();
-    printf("Temperature: %0.1f Graus\n", temperatura);
-    vTaskDelay(300 / portTICK_PERIOD_MS);
+    tempData = ds18b20_get_temp();
+    vTaskDelay(500 / portTICK_PERIOD_MS);
   }
 }
 
 
 void app_main() {
-  // nvs_flash_init();
-  // system_init();
-  xTaskCreate(&measure_temp, "measure_temp", 2048, NULL, 5, NULL);
-  xTaskCreate(&measure_distance, "measure_distance", configMINIMAL_STACK_SIZE * 4, NULL, 5, NULL);
+  ESP_LOGI(TAG, "Iniciando");
   gpio_pad_select_gpio(TRIGGER_PIN);
   gpio_set_direction(TRIGGER_PIN, GPIO_MODE_OUTPUT );
-
   gpio_pad_select_gpio(ECHO_PIN);
   gpio_set_direction(ECHO_PIN, GPIO_MODE_INPUT);
 
+  // o esp ta morrendo qnd da um log de erro
+  xTaskCreate(&measure_distance, "measure_distance", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY, NULL);
+  // xTaskCreate(&measure_temp, "measure_temp", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
 
-  // while(1) {
-  //   printf("iniciando\n");
-
-  //   gpio_set_level(TRIGGER_PIN, 1);
-  //   ets_delay_us(10);
-  //   gpio_set_level(TRIGGER_PIN, 0);
-    
-  //   printf("sinal de trigger enviado\n");
-
-  //   while(gpio_get_level(ECHO_PIN) == 0)
-  //   ;
-  //   printf("recebendo echo...\n");
-
-  //   uint64_t start_time = esp_timer_get_time();
-  //   while(gpio_get_level(ECHO_PIN) == 1)
-  //   ;
-  //   printf("echo recebido\n");
-  //   uint64_t end_time = esp_timer_get_time();
-
-  //   float time_diff = (float) end_time - start_time;
-  //   float distance = time_diff / 58.0;
-  //   printf("START TIME: %d; END TIME: %d\n", start_time, end_time);
-  //   printf("Distancia: %0.1fcm\n", distance);
-  //   vTaskDelay(1000 / portTICK_PERIOD_MS);
-  // }
+  vTaskStartScheduler();
+  while(1) {
+    ESP_LOGI(TAG, "Distancia: status=%i; value=%i", distData.isWorking, distData.distance);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
 }

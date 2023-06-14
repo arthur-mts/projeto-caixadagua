@@ -29,6 +29,13 @@
 typedef uint8_t DeviceAddress[8];
 typedef uint8_t ScratchPad[9];
 
+struct Ds18b20GetTemp {
+	int isWorking;
+	float temp;
+};
+
+typedef struct Ds18b20GetTemp Ds18b20GetTemp; 
+
 // Dow-CRC using polynomial X^8 + X^5 + X^4 + X^0
 // Tiny 2x16 entry CRC table created by Arjen Lentz
 // See http://lentz.com.au/blog/calculating-crc-with-a-tiny-32-entry-lookup-table
@@ -71,7 +78,7 @@ void ds18b20_requestTemperatures();
 float ds18b20_getTempF(const DeviceAddress *deviceAddress);
 float ds18b20_getTempC(const DeviceAddress *deviceAddress);
 int16_t calculateTemperature(const DeviceAddress *deviceAddress, uint8_t* scratchPad);
-float ds18b20_get_temp(void);
+Ds18b20GetTemp ds18b20_get_temp(void);
 
 void reset_search();
 bool search(uint8_t *newAddr, bool search_mode);
