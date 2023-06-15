@@ -51,20 +51,22 @@ void measure_distance(void *pvParameters) {
     distData.isWorking = 1;
 
     while(gpio_get_level(ECHO_PIN) == 0) {
-      if((esp_timer_get_time() - start_time_check) >= 500) {
-        distData.isWorking = 0;
-        goto continue_parent_loop;
-      }
+      // if((esp_timer_get_time() - start_time_check) >= 500) {
+      //   ESP_LOGE(TAG, "Echo não voltou");
+      //   distData.isWorking = 0;
+      //   goto continue_parent_loop;
+      // }
     }
 
     uint64_t start_time = esp_timer_get_time();
     while(gpio_get_level(ECHO_PIN) == 1) {
+      ESP_LOGI(TAG, "diferenca de tempo: %u", esp_timer_get_time() - start_time_check);
       if((esp_timer_get_time() - start_time_check) >= 500) {
+        ESP_LOGE(TAG, "Echo não voltou");
         distData.isWorking = 0;
         goto continue_parent_loop;
       }
     }
-
     uint64_t end_time = esp_timer_get_time();
 
     float time_diff = (float) end_time - start_time;
@@ -89,19 +91,19 @@ void measure_temp(void *pvParameters)
 
 
 void app_main() {
-  ESP_LOGI(TAG, "Iniciando");
+  // ESP_LOGI(TAG, "Iniciando");
   gpio_pad_select_gpio(TRIGGER_PIN);
   gpio_set_direction(TRIGGER_PIN, GPIO_MODE_OUTPUT );
   gpio_pad_select_gpio(ECHO_PIN);
   gpio_set_direction(ECHO_PIN, GPIO_MODE_INPUT);
 
   // o esp ta morrendo qnd da um log de erro
-  xTaskCreate(&measure_distance, "measure_distance", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY, NULL);
-  // xTaskCreate(&measure_temp, "measure_temp", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
+  xTaskCreate(&measure_distance, "measure_distance", 2048, NULL, 5, NULL);
+  xTaskCreate(&measure_temp, "measure_temp", 1024, NULL, 5, NULL);
 
-  vTaskStartScheduler();
   while(1) {
-    ESP_LOGI(TAG, "Distancia: status=%i; value=%i", distData.isWorking, distData.distance);
+    ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
+    ESP_LOGI(TAG, "Temperatura: status=%i; value=%.2f", tempData.isWorking, tempData.temp);
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
