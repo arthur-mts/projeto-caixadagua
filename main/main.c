@@ -55,7 +55,7 @@ void measure_distance(void *pvParameters) {
     ets_delay_us(10);
     gpio_set_level(TRIGGER_PIN, 0);
     // ESP_LOGI(TAG, "Mandei o trigger");
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
 
@@ -65,37 +65,28 @@ void measure_temp(void *pvParameters)
   while (1)
   {
     tempData = ds18b20_get_temp();
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
 
 void IRAM_ATTR gpio_isr_handler_distance(void* arg) {
     uint32_t gpio_num = (uint32_t)arg;
-    xQueueSendFromISR(gpio_evt_queue_distance, &gpio_num, NULL);
-} 
-
-void handle_echo_change(void* arg) {
-  uint32_t gpio_num;
-  while (1) {
-    if (xQueueReceive(gpio_evt_queue_distance, &gpio_num, portMAX_DELAY)) {
-      int gpio_level = gpio_get_level(gpio_num);
+    int gpio_level = gpio_get_level(gpio_num);
 
 
-      if (gpio_level == 0) {
-        end_echo_time_check = esp_timer_get_time();
-        ESP_LOGI(TAG, "Borda de descida");
-        float time_diff = (float) end_echo_time_check - start_echo_time_check;
-        float distance = time_diff / 58.0;
-        distData.isWorking = 1;
-        distData.distance = distance;
-        ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
-      } else {
-        start_echo_time_check = esp_timer_get_time();
-        ESP_LOGI(TAG, "Borda de subida");
-      }
+    if (gpio_level == 0) {
+      end_echo_time_check = esp_timer_get_time();
+      // ESP_LOGI(TAG, "Borda de descida");
+      float time_diff = (float) end_echo_time_check - start_echo_time_check;
+      float distance = time_diff / 58.0;
+      distData.isWorking = 1;
+      distData.distance = distance;
+      // ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
+    } else {
+      start_echo_time_check = esp_timer_get_time();
+      // ESP_LOGI(TAG, "Borda de subida");
     }
-  }
-}
+} 
 
 void config_measure_distance() {
   gpio_pad_select_gpio(TRIGGER_PIN);
@@ -112,16 +103,15 @@ void config_measure_distance() {
   gpio_isr_handler_add(ECHO_PIN, gpio_isr_handler_distance, (void*)ECHO_PIN);
 
   xTaskCreate(&measure_distance, "measure_distance", 2048, NULL, 5, NULL);
-  xTaskCreate(&handle_echo_change, "handle_echo_change", 2048, NULL, 1, NULL);
 }
 
 void app_main() {
   config_measure_distance();
   xTaskCreate(&measure_temp, "measure_temp", 1024, NULL, 5, NULL);
 
-  // while(1) {
-  //   ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
-  //   // ESP_LOGI(TAG, "Temperatura: status=%i; value=%.2f", tempData.isWorking, tempData.temp);
-  //   vTaskDelay(1000 / portTICK_PERIOD_MS);
-  // }
+  while(1) {
+    ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
+    // ESP_LOGI(TAG, "Temperatura: status=%i; value=%.2f", tempData.isWorking, tempData.temp);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
 }
