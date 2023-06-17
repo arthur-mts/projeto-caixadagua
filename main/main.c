@@ -54,7 +54,6 @@ void measure_distance(void *pvParameters) {
     gpio_set_level(TRIGGER_PIN, 1);
     ets_delay_us(10);
     gpio_set_level(TRIGGER_PIN, 0);
-    // ESP_LOGI(TAG, "Mandei o trigger");
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
@@ -76,15 +75,13 @@ void IRAM_ATTR gpio_isr_handler_distance(void* arg) {
 
     if (gpio_level == 0) {
       end_echo_time_check = esp_timer_get_time();
-      // ESP_LOGI(TAG, "Borda de descida");
       float time_diff = (float) end_echo_time_check - start_echo_time_check;
       float distance = time_diff / 58.0;
+      // TODO: checar se o valor ta maior ou menor doq o limite e marcar como is working 0
       distData.isWorking = 1;
       distData.distance = distance;
-      // ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
     } else {
       start_echo_time_check = esp_timer_get_time();
-      // ESP_LOGI(TAG, "Borda de subida");
     }
 } 
 
