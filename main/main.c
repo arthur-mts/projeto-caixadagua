@@ -25,6 +25,7 @@
 #include "driver/gpio.h"
 #include <freertos/queue.h>
 #include <esp_intr_alloc.h>
+#include "driver/i2c.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
 #include "esp_log.h"
@@ -32,8 +33,12 @@
 #define DS_GPIO 3    // GPIO where you connected ds18b20
 #define TRIGGER_PIN 0
 #define ECHO_PIN 1
-#define RELE_MOTOR_PIN 18
-#define RELE_RESIST_PIN 12
+#define RELE_MOTOR_PIN 18 //mudar
+#define RELE_RESIST_PIN 12 //mudar
+
+
+#define DISPLAY_SDA_PIN 12
+#define DISPLAY_SCL_PIN 18
 #define TAG "CAIXA DAGUA"
 
 // Distance
@@ -128,14 +133,30 @@ void enable_resistencia(int enabled) {
   gpio_set_level(RELE_RESIST_PIN, !enabled);
 }
 
+void config_display() {
+  i2c_config_t i2c_config = {
+    .mode = I2C_MODE_MASTER,
+    .sda_io_num = DISPLAY_SDA_PIN,
+    .sda_pullup_en = GPIO_PULLUP_ENABLE,
+    .scl_io_num = DISPLAY_SCL_PIN,
+    .scl_pullup_en = GPIO_PULLUP_ENABLE,
+    .master.clk_speed = 100000
+  };
+
+  i2c_param_config(I2C_NUM_0, &i2c_config);
+  i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
+
+}
+
 void app_main() {
   config_measure_distance();
   config_reles();
   config_measure_temp();
 
+  config_display();
   while(1) {
-    // ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
-    // ESP_LOGI(TAG, "Temperatura: status=%i; value=%.2f", tempData.isWorking, tempData.temp);
+    ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
+    ESP_LOGI(TAG, "Temperatura: status=%i; value=%.2f", tempData.isWorking, tempData.temp);
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     // gpio_set_level(RELE_INPUT, 1);
   }
