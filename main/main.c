@@ -19,6 +19,8 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "hal/gpio_types.h"
+#include "rom/gpio.h"
 #include "string.h"
 #include "driver/gpio.h"
 #include <freertos/queue.h>
@@ -30,6 +32,8 @@
 #define DS_GPIO 3    // GPIO where you connected ds18b20
 #define TRIGGER_PIN 0
 #define ECHO_PIN 1
+#define RELE_MOTOR_PIN 18
+#define RELE_RESIST_PIN 12
 #define TAG "CAIXA DAGUA"
 
 // Distance
@@ -49,7 +53,7 @@ uint64_t end_echo_time_check = 0;
 Ds18b20GetTemp tempData;
 
 
-void measure_distance(void *pvParameters) {
+void trigger_echo(void *pvParameters) {
   while(1) {
     gpio_set_level(TRIGGER_PIN, 1);
     ets_delay_us(10);
@@ -58,8 +62,7 @@ void measure_distance(void *pvParameters) {
   }
 }
 
-void measure_temp(void *pvParameters)
-{
+void measure_temp(void *pvParameters) {
   ds18b20_init(DS_GPIO);
   while (1)
   {
@@ -99,16 +102,41 @@ void config_measure_distance() {
   gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1);
   gpio_isr_handler_add(ECHO_PIN, gpio_isr_handler_distance, (void*)ECHO_PIN);
 
-  xTaskCreate(&measure_distance, "measure_distance", 2048, NULL, 5, NULL);
+  xTaskCreate(&trigger_echo, "trigger_echo", 2048, NULL, 5, NULL);
+}
+
+void config_reles() {
+  // Iniciando os reles desativados
+  gpio_pad_select_gpio(RELE_MOTOR_PIN);
+  gpio_set_direction(RELE_MOTOR_PIN, GPIO_MODE_OUTPUT);
+  gpio_set_level(RELE_MOTOR_PIN, 1);
+
+  gpio_pad_select_gpio(RELE_RESIST_PIN);
+  gpio_set_direction(RELE_RESIST_PIN, GPIO_MODE_OUTPUT);
+  gpio_set_level(RELE_RESIST_PIN, 1);
+}
+
+void config_measure_temp() {
+  xTaskCreate(&measure_temp, "measure_temp", 1024, NULL, 5, NULL);
+}
+
+void enable_motor(int enabled) {
+  gpio_set_level(RELE_MOTOR_PIN, !enabled);
+}
+
+void enable_resistencia(int enabled) {
+  gpio_set_level(RELE_RESIST_PIN, !enabled);
 }
 
 void app_main() {
   config_measure_distance();
-  xTaskCreate(&measure_temp, "measure_temp", 1024, NULL, 5, NULL);
+  config_reles();
+  config_measure_temp();
 
   while(1) {
-    ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
+    // ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
     // ESP_LOGI(TAG, "Temperatura: status=%i; value=%.2f", tempData.isWorking, tempData.temp);
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    // gpio_set_level(RELE_INPUT, 1);
   }
 }
