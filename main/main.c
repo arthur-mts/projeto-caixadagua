@@ -1,21 +1,3 @@
-/*
-   This is example for my DS18B20 library
-   https://github.com/feelfreelinux/ds18b20
-
-
-   This program is free software: you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation, either version 3 of the License, or
-   (at your option) any later version.
-
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -27,6 +9,7 @@
 #include <esp_intr_alloc.h>
 #include "driver/i2c.h"
 #include "esp_system.h"
+#include "esp_adc_cal.h"
 #include "nvs_flash.h"
 #include "esp_log.h"
 #include "ds18b20.h" //Include library
@@ -35,11 +18,34 @@
 #define ECHO_PIN 1
 #define RELE_MOTOR_PIN 18 //mudar
 #define RELE_RESIST_PIN 12 //mudar
-#include "display.c"
-#define DISPLAY_SDA_PIN 4
-#define DISPLAY_SCL_PIN 5
-#define LCD_I2C_ADDR 0x27
+#include "driver/adc.h"
 #define TAG "CAIXA DAGUA"
+
+// Botoes
+#define JOYSTICK_SW_PIN 12
+#define JOYSTIC_Y_PIN 2
+
+#define ADC_WIDTH_BIT 10
+#define ADC_MAX_VALUE ((1<<ADC_WIDTH_BIT)-1)
+#define DEFAULT_VREF    1100        // Valor de referência para a calibração ADC (em mV)
+#define NO_OF_SAMPLES   64          // Número de amostras ADC para média
+
+typedef enum display_status_t {
+  READ = 0,
+  WRITE_TEMP = 1,
+  WRITE_NVL = 2
+} display_status_t;
+
+display_status_t display_status = READ;
+
+typedef enum joystic_status {
+  MIDDLE = 0,
+  UP = 1,
+  DOWN = 2
+} joystic_status;
+
+// DIsplay
+#include "display.c"
 
 // Distance
 struct HcSR04GetDist
@@ -133,97 +139,59 @@ void enable_resistencia(int enabled) {
   gpio_set_level(RELE_RESIST_PIN, !enabled);
 }
 
+static esp_adc_cal_characteristics_t adc1_chars;
+void configure_buttons() {
+
+  esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_DEFAULT, 0, &adc1_chars);
+  ESP_ERROR_CHECK(adc1_config_width(ADC_WIDTH_BIT_DEFAULT));
+  ESP_ERROR_CHECK(adc1_config_channel_atten(ADC1_CHANNEL_2, ADC_ATTEN_DB_11));
 
 
-void config_display() {
-//   i2c_config_t i2c_config = {
-//     .mode = I2C_MODE_MASTER,
-//     .sda_io_num = DISPLAY_SDA_PIN,
-//     .sda_pullup_en = GPIO_PULLUP_ENABLE,
-//     .scl_io_num = DISPLAY_SCL_PIN,
-//     .scl_pullup_en = GPIO_PULLUP_ENABLE,
-//     .master.clk_speed = 100000
-//   };
 
-//   i2c_param_config(I2C_NUM_0, &i2c_config);
-//   i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
 
-//   uint8_t lcd_init_cmds[] = {
-//     0x4E,   // Function Set: 2 linhas, 5x8 dots
-//     0x01,   // Clear Display
-//     0x0C,   // Display ON, Cursor OFF
-//     0x06    // Entry Mode: Incrementa cursor
-// };
 
-//   i2c_cmd_handle_t cmd;
-//   cmd = i2c_cmd_link_create();
-//   i2c_master_start(cmd);
-//   i2c_master_write_byte(cmd, (LCD_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
-//   i2c_master_write_byte(cmd, 0x00, true);
-
-//   for (int i = 0; i < sizeof(lcd_init_cmds); i++) {
-//       i2c_master_write_byte(cmd, lcd_init_cmds[i], true);
-//   }
-
-//   i2c_master_stop(cmd);
-//   i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_RATE_MS);
-//   i2c_cmd_link_delete(cmd);
-  LCD_init(LCD_I2C_ADDR, DISPLAY_SDA_PIN, DISPLAY_SCL_PIN, 16, 2);
+  gpio_pad_select_gpio(JOYSTICK_SW_PIN);
+  gpio_set_direction(JOYSTICK_SW_PIN, GPIO_MODE_INPUT);
 }
 
-void lcd_write_text(const char* text, uint8_t row, uint8_t col) {
-    i2c_cmd_handle_t cmd;
-    cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (LCD_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, 0x00, true);
-    i2c_master_write_byte(cmd, 0x80 | (col + row * 0x40), true);
-
-    const char* p = text;
-    while (*p) {
-        i2c_master_write_byte(cmd, *p++, true);
-    }
-
-    i2c_master_stop(cmd);
-    i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_RATE_MS);
-    i2c_cmd_link_delete(cmd);
+int analogRead(uint8_t pin) {
+    uint32_t voltage = esp_adc_cal_raw_to_voltage(adc1_get_raw(ADC1_CHANNEL_2), &adc1_chars);
+    return voltage;
 }
 
-void LCD_DemoTask(void* param)
-{
-    char num[20];
-    while (true) {
-        LCD_home();
-        LCD_clearScreen();
-        LCD_writeStr("16x2 I2C LCD");
-        vTaskDelay(3000 / portTICK_RATE_MS);
-        LCD_clearScreen();
-        LCD_writeStr("Lets Count 0-10!");
-        vTaskDelay(3000 / portTICK_RATE_MS);
-        LCD_clearScreen();
-        for (int i = 0; i <= 10; i++) {
-            LCD_setCursor(8, 1);
-            sprintf(num, "%d", i);
-            LCD_writeStr(num);
-            vTaskDelay(1000 / portTICK_RATE_MS);
-        }
-  
-    }
+joystic_status readJoystick() {
+  uint32_t voltage = esp_adc_cal_raw_to_voltage(adc1_get_raw(ADC1_CHANNEL_2), &adc1_chars);
+  return voltage;
+
+  if (voltage >= 2700) {
+    return DOWN;
+  }
+  else if (voltage < 200) {
+    return UP;
+  } else {
+    return MIDDLE;
+  }
 }
+
+void display_menu() {
+  write_on_lcd("TEMP | NVL | RD", 0);
+  write_on_lcd(" 10C | 90ml|   ", 1);
+}
+
 
 void app_main() {
   config_measure_distance();
   config_reles();
   config_measure_temp();
   config_display();
+  configure_buttons();
 
 
+  display_menu();
   while(1) {
-    ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
-    ESP_LOGI(TAG, "Temperatura: status=%i; value=%.2f", tempData.isWorking, tempData.temp);
-    // lcd_write_text("Hello, World!", 0, 0);
-    xTaskCreate(&LCD_DemoTask, "Demo Task", 2048, NULL, 5, NULL);
-
-    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    ESP_LOGI(TAG, "Eixo y: %i", analogRead(JOYSTIC_Y_PIN));
+    // ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
+    // ESP_LOGI(TAG, "Temperatura: status=%i; value=%.2f", tempData.isWorking, tempData.temp);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);  
   }
 }
