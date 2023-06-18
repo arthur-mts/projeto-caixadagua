@@ -17,6 +17,7 @@
         "esp_bit_defs.h": "c",
         "nvs_flash.h": "c",
         "ds18b20.h": "c",
-        "*.tcc": "c"
+        "*.tcc": "c",
+        "ratio": "c"
     }
 }

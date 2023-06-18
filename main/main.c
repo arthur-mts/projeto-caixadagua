@@ -35,10 +35,10 @@
 #define ECHO_PIN 1
 #define RELE_MOTOR_PIN 18 //mudar
 #define RELE_RESIST_PIN 12 //mudar
-
-
-#define DISPLAY_SDA_PIN 12
-#define DISPLAY_SCL_PIN 18
+#include "display.c"
+#define DISPLAY_SDA_PIN 4
+#define DISPLAY_SCL_PIN 5
+#define LCD_I2C_ADDR 0x27
 #define TAG "CAIXA DAGUA"
 
 // Distance
@@ -133,31 +133,97 @@ void enable_resistencia(int enabled) {
   gpio_set_level(RELE_RESIST_PIN, !enabled);
 }
 
+
+
 void config_display() {
-  i2c_config_t i2c_config = {
-    .mode = I2C_MODE_MASTER,
-    .sda_io_num = DISPLAY_SDA_PIN,
-    .sda_pullup_en = GPIO_PULLUP_ENABLE,
-    .scl_io_num = DISPLAY_SCL_PIN,
-    .scl_pullup_en = GPIO_PULLUP_ENABLE,
-    .master.clk_speed = 100000
-  };
+//   i2c_config_t i2c_config = {
+//     .mode = I2C_MODE_MASTER,
+//     .sda_io_num = DISPLAY_SDA_PIN,
+//     .sda_pullup_en = GPIO_PULLUP_ENABLE,
+//     .scl_io_num = DISPLAY_SCL_PIN,
+//     .scl_pullup_en = GPIO_PULLUP_ENABLE,
+//     .master.clk_speed = 100000
+//   };
 
-  i2c_param_config(I2C_NUM_0, &i2c_config);
-  i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
+//   i2c_param_config(I2C_NUM_0, &i2c_config);
+//   i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
 
+//   uint8_t lcd_init_cmds[] = {
+//     0x4E,   // Function Set: 2 linhas, 5x8 dots
+//     0x01,   // Clear Display
+//     0x0C,   // Display ON, Cursor OFF
+//     0x06    // Entry Mode: Incrementa cursor
+// };
+
+//   i2c_cmd_handle_t cmd;
+//   cmd = i2c_cmd_link_create();
+//   i2c_master_start(cmd);
+//   i2c_master_write_byte(cmd, (LCD_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
+//   i2c_master_write_byte(cmd, 0x00, true);
+
+//   for (int i = 0; i < sizeof(lcd_init_cmds); i++) {
+//       i2c_master_write_byte(cmd, lcd_init_cmds[i], true);
+//   }
+
+//   i2c_master_stop(cmd);
+//   i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_RATE_MS);
+//   i2c_cmd_link_delete(cmd);
+  LCD_init(LCD_I2C_ADDR, DISPLAY_SDA_PIN, DISPLAY_SCL_PIN, 16, 2);
+}
+
+void lcd_write_text(const char* text, uint8_t row, uint8_t col) {
+    i2c_cmd_handle_t cmd;
+    cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (LCD_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, 0x00, true);
+    i2c_master_write_byte(cmd, 0x80 | (col + row * 0x40), true);
+
+    const char* p = text;
+    while (*p) {
+        i2c_master_write_byte(cmd, *p++, true);
+    }
+
+    i2c_master_stop(cmd);
+    i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_RATE_MS);
+    i2c_cmd_link_delete(cmd);
+}
+
+void LCD_DemoTask(void* param)
+{
+    char num[20];
+    while (true) {
+        LCD_home();
+        LCD_clearScreen();
+        LCD_writeStr("16x2 I2C LCD");
+        vTaskDelay(3000 / portTICK_RATE_MS);
+        LCD_clearScreen();
+        LCD_writeStr("Lets Count 0-10!");
+        vTaskDelay(3000 / portTICK_RATE_MS);
+        LCD_clearScreen();
+        for (int i = 0; i <= 10; i++) {
+            LCD_setCursor(8, 1);
+            sprintf(num, "%d", i);
+            LCD_writeStr(num);
+            vTaskDelay(1000 / portTICK_RATE_MS);
+        }
+  
+    }
 }
 
 void app_main() {
   config_measure_distance();
   config_reles();
   config_measure_temp();
-
   config_display();
+
+
   while(1) {
     ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
     ESP_LOGI(TAG, "Temperatura: status=%i; value=%.2f", tempData.isWorking, tempData.temp);
+    // lcd_write_text("Hello, World!", 0, 0);
+    xTaskCreate(&LCD_DemoTask, "Demo Task", 2048, NULL, 5, NULL);
+
     vTaskDelay(3000 / portTICK_PERIOD_MS);
-    // gpio_set_level(RELE_INPUT, 1);
   }
 }
