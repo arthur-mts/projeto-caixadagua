@@ -7,6 +7,7 @@
 #include "driver/gpio.h"
 #include <freertos/queue.h>
 #include <esp_intr_alloc.h>
+#include <sys/_stdint.h>
 #include "driver/i2c.h"
 #include "esp_system.h"
 #include "esp_adc_cal.h"
@@ -37,12 +38,12 @@ typedef enum display_status_t {
 } display_status_t;
 
 display_status_t display_status = READ;
-
-typedef enum joystic_status {
+int trigou = 0;
+typedef enum joystic_status_t {
   MIDDLE = 0,
   UP = 1,
   DOWN = 2
-} joystic_status;
+} joystic_status_t;
 
 // DIsplay
 #include "display.c"
@@ -55,7 +56,6 @@ struct HcSR04GetDist
 };
 typedef struct HcSR04GetDist HcSR04GetDist;
 HcSR04GetDist distData = { 0, 0 };
-QueueHandle_t gpio_evt_queue_distance = NULL;
 
 uint64_t start_echo_time_check = 0;
 uint64_t end_echo_time_check = 0;
@@ -63,6 +63,48 @@ uint64_t end_echo_time_check = 0;
 // Temperature
 Ds18b20GetTemp tempData;
 
+
+struct ApplicationData {
+  uint32_t desiredTemp;
+  uint32_t desiredNvl;
+};
+typedef struct ApplicationData ApplicationData;
+ApplicationData appData =  {30, 50};
+uint32_t editTemp;
+uint32_t editNvl;
+
+#define MAX_TEMP 90
+#define MIN_TEMP 30
+
+#define MAX_NVL 900
+#define MIN_NVL 50
+
+#define STEP_TEMP 10
+#define STEP_NVL 50
+
+void IRAM_ATTR gpio_isr_handle_sw(void* arg) {
+    trigou = !trigou;
+
+}
+
+void IRAM_ATTR gpio_isr_handle_echo(void* arg) { 
+
+  
+  int gpio_level = gpio_get_level(ECHO_PIN);
+
+
+  if (gpio_level == 0) {
+    end_echo_time_check = esp_timer_get_time();
+    float time_diff = (float) end_echo_time_check - start_echo_time_check;
+    float distance = time_diff / 58.0;
+    // TODO: checar se o valor ta maior ou menor doq o limite e marcar como is working 0
+    distData.isWorking = 1;
+    distData.distance = distance;
+  } else {
+    start_echo_time_check = esp_timer_get_time();
+  }
+  
+}
 
 void trigger_echo(void *pvParameters) {
   while(1) {
@@ -82,23 +124,6 @@ void measure_temp(void *pvParameters) {
   }
 }
 
-void IRAM_ATTR gpio_isr_handler_distance(void* arg) {
-    uint32_t gpio_num = (uint32_t)arg;
-    int gpio_level = gpio_get_level(gpio_num);
-
-
-    if (gpio_level == 0) {
-      end_echo_time_check = esp_timer_get_time();
-      float time_diff = (float) end_echo_time_check - start_echo_time_check;
-      float distance = time_diff / 58.0;
-      // TODO: checar se o valor ta maior ou menor doq o limite e marcar como is working 0
-      distData.isWorking = 1;
-      distData.distance = distance;
-    } else {
-      start_echo_time_check = esp_timer_get_time();
-    }
-} 
-
 void config_measure_distance() {
   gpio_pad_select_gpio(TRIGGER_PIN);
   gpio_set_direction(TRIGGER_PIN, GPIO_MODE_OUTPUT);
@@ -108,10 +133,7 @@ void config_measure_distance() {
   gpio_set_direction(ECHO_PIN, GPIO_MODE_INPUT);
   gpio_set_intr_type(ECHO_PIN, GPIO_INTR_ANYEDGE);
   
-  gpio_evt_queue_distance = xQueueCreate(10, sizeof(uint32_t));
-
-  gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1);
-  gpio_isr_handler_add(ECHO_PIN, gpio_isr_handler_distance, (void*)ECHO_PIN);
+  gpio_isr_handler_add(ECHO_PIN, gpio_isr_handle_echo, (void*)ECHO_PIN);
 
   xTaskCreate(&trigger_echo, "trigger_echo", 2048, NULL, 5, NULL);
 }
@@ -139,59 +161,220 @@ void enable_resistencia(int enabled) {
   gpio_set_level(RELE_RESIST_PIN, !enabled);
 }
 
-static esp_adc_cal_characteristics_t adc1_chars;
-void configure_buttons() {
 
+static esp_adc_cal_characteristics_t adc1_chars;
+void configure_joystick_y() {
   esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_DEFAULT, 0, &adc1_chars);
   ESP_ERROR_CHECK(adc1_config_width(ADC_WIDTH_BIT_DEFAULT));
   ESP_ERROR_CHECK(adc1_config_channel_atten(ADC1_CHANNEL_2, ADC_ATTEN_DB_11));
-
-
-
-
-
-  gpio_pad_select_gpio(JOYSTICK_SW_PIN);
-  gpio_set_direction(JOYSTICK_SW_PIN, GPIO_MODE_INPUT);
 }
 
-int analogRead(uint8_t pin) {
-    uint32_t voltage = esp_adc_cal_raw_to_voltage(adc1_get_raw(ADC1_CHANNEL_2), &adc1_chars);
-    return voltage;
-}
 
-joystic_status readJoystick() {
+joystic_status_t readJoystick() {
   uint32_t voltage = esp_adc_cal_raw_to_voltage(adc1_get_raw(ADC1_CHANNEL_2), &adc1_chars);
-  return voltage;
-
   if (voltage >= 2700) {
     return DOWN;
   }
-  else if (voltage < 200) {
+  else if (voltage < 300) {
     return UP;
   } else {
     return MIDDLE;
   }
 }
 
+
+unsigned long currentMilis() {
+  return xTaskGetTickCount() * portTICK_RATE_MS;
+}
+
 void display_menu() {
+  char display1[16];
+
+  char * display0 = " %iC | %iml|   ";
+  if(appData.desiredNvl >= 100) {
+    display0 = " %iC |%iml|   ";
+  }
+  sprintf(display1, display0, appData.desiredTemp, appData.desiredNvl);
   write_on_lcd("TEMP | NVL | RD", 0);
-  write_on_lcd(" 10C | 90ml|   ", 1);
+  write_on_lcd(display1, 1);
+}
+
+void display_edit_nvl() {
+  char display1[16];
+  char * display0 = "     | %iml|   ";
+  if(editNvl >= 100) {
+    display0 = "     |%iml|   ";
+  }
+  sprintf(display1, display0, editNvl);
+  write_on_lcd("     | NVL |   ", 0);
+  write_on_lcd(display1, 1);
+}
+
+void display_edit_temp() {
+  char display1[16];
+  sprintf(display1, " %iC |          ", editTemp);
+  write_on_lcd("TEMP |", 0);
+  write_on_lcd(display1, 1);
+}
+
+void execute_temp_update() {
+  appData.desiredTemp = editTemp;
+}
+
+void execute_nvl_update() {
+  appData.desiredNvl = editNvl;
+}
+
+void sw_button_handler() {
+  int last_led_state = 0;
+  int button_current_state = 0;
+  unsigned long last_debounce_time = 0;
+
+  int pressed = 0;
+
+  while(1) {
+    button_current_state = !gpio_get_level(JOYSTICK_SW_PIN);
+    
+    if (button_current_state != last_led_state) {
+      last_debounce_time = currentMilis();
+      last_led_state = button_current_state;
+    }
+
+    if ((currentMilis() - last_debounce_time) > 100) {
+      if (button_current_state == 1) {
+        pressed = 1;
+        ESP_LOGI(TAG, "Botao apertado");
+      } else {
+        if(pressed == 1) {
+          ESP_LOGI(TAG, "Botao solto");
+          switch(display_status) {
+            case READ:
+              clear_lcd();
+              display_status = WRITE_TEMP;
+              break;
+            case WRITE_TEMP:
+              clear_lcd();
+              execute_temp_update();
+              display_status = WRITE_NVL;
+              break;
+            case WRITE_NVL:
+              clear_lcd();
+              execute_nvl_update();
+              display_status = READ;
+              break;
+          }
+          pressed = 0;
+        }
+      }
+    }
+    vTaskDelay(100/ portTICK_PERIOD_MS);
+  }
+}
+
+
+void configure_joystick_sw_button() {
+  gpio_pad_select_gpio(JOYSTICK_SW_PIN);
+  gpio_set_direction(JOYSTICK_SW_PIN, GPIO_MODE_INPUT);
+
+  xTaskCreate(&sw_button_handler,"sw_button_handler",2048, NULL, configMAX_PRIORITIES, NULL);
+}
+
+
+
+void increase_temp() {
+  uint32_t new_temp = editTemp + STEP_TEMP;
+
+  if (new_temp <= MAX_TEMP && new_temp >= MIN_TEMP) {
+    editTemp = new_temp;
+  }
+}
+
+void decrease_temp() {
+  uint32_t new_temp = editTemp - STEP_TEMP;
+
+  if (new_temp <= MAX_TEMP && new_temp >= MIN_TEMP) {
+    editTemp = new_temp;
+  }
+}
+
+void increase_nvl() {
+  uint32_t new_nvl = editNvl + STEP_NVL;
+
+  if (new_nvl <= MAX_NVL && new_nvl >= MIN_NVL) {
+    editNvl = new_nvl;
+  }
+}
+
+void decrease_nvl() {
+  uint32_t new_nvl = editNvl - STEP_NVL;
+    if (new_nvl <= MAX_NVL && new_nvl >= MIN_NVL) {
+    editNvl = new_nvl;
+  }
 }
 
 
 void app_main() {
+
+  editTemp = appData.desiredTemp;
+  editNvl = appData.desiredNvl;
+  gpio_install_isr_service(0);
   config_measure_distance();
   config_reles();
   config_measure_temp();
   config_display();
-  configure_buttons();
+  configure_joystick_y();
+  configure_joystick_sw_button();
 
 
-  display_menu();
+  joystic_status_t cur_joystick_status;
+  joystic_status_t prev_joystick_status = MIDDLE;
+
   while(1) {
-    ESP_LOGI(TAG, "Eixo y: %i", analogRead(JOYSTIC_Y_PIN));
-    // ESP_LOGI(TAG, "Distancia: status=%i; value=%.2f", distData.isWorking, distData.distance);
-    // ESP_LOGI(TAG, "Temperatura: status=%i; value=%.2f", tempData.isWorking, tempData.temp);
-    vTaskDelay(1000 / portTICK_PERIOD_MS);  
+    switch(display_status) {
+      case WRITE_TEMP:
+        cur_joystick_status = readJoystick();
+        switch(cur_joystick_status) {
+          case MIDDLE:
+            if (prev_joystick_status == UP) {
+              increase_temp();
+            } else if(prev_joystick_status == DOWN) {
+              decrease_temp();
+            }
+            prev_joystick_status = MIDDLE;
+            break;
+          case UP:
+            prev_joystick_status = UP;
+            break;
+          case DOWN:
+            prev_joystick_status = DOWN;
+            break;
+        }
+        display_edit_temp();
+        break;
+      case WRITE_NVL:
+        cur_joystick_status = readJoystick();
+        switch(cur_joystick_status) {
+          case MIDDLE:
+            if (prev_joystick_status == UP) {
+              increase_nvl();
+            } else if(prev_joystick_status == DOWN) {
+              decrease_nvl();
+            }
+            prev_joystick_status = MIDDLE;
+            break;
+          case UP:
+            prev_joystick_status = UP;
+            break;
+          case DOWN:
+            prev_joystick_status = DOWN;
+            break;
+        }
+        display_edit_nvl();
+        break;
+      case READ:
+        display_menu();
+        break;
+    }
+    vTaskDelay(100 / portTICK_PERIOD_MS);  
   }
 }

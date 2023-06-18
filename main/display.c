@@ -53,3 +53,7 @@ void write_on_lcd(char *string, int line)
     hd44780_gotoxy(&lcd, 0, line);
     hd44780_puts(&lcd, string);
 }
+
+void clear_lcd() {
+    hd44780_clear(&lcd);
+}
