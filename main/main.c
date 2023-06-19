@@ -17,8 +17,15 @@
 #define DS_GPIO 3    // GPIO where you connected ds18b20
 #define TRIGGER_PIN 0
 #define ECHO_PIN 1
-#define RELE_MOTOR_PIN 18 //mudar
-#define RELE_RESIST_PIN 12 //mudar
+
+
+
+#define RELE_MOTOR_PIN 10 //mudar
+#define RELE_RESIST_PIN 6 //mudar
+#define ENABLE_RESIST_TRESHOLD 5
+#define ENABLE_MOTOR_TRESHOLD 5
+
+
 #include "driver/adc.h"
 #define TAG "CAIXA DAGUA"
 
@@ -151,18 +158,29 @@ void config_reles() {
   gpio_pad_select_gpio(RELE_RESIST_PIN);
   gpio_set_direction(RELE_RESIST_PIN, GPIO_MODE_OUTPUT);
   gpio_set_level(RELE_RESIST_PIN, 1);
+  ESP_LOGI(TAG, "Reles configurados");
 }
 
 void config_measure_temp() {
   xTaskCreate(&measure_temp, "measure_temp", 1024, NULL, 5, NULL);
 }
 
-void enable_motor(int enabled) {
-  gpio_set_level(RELE_MOTOR_PIN, !enabled);
+void active_motor() {
+  gpio_set_level(RELE_MOTOR_PIN, 0);
+  // ESP_LOGW(TAG, "Motor ligado");
 }
 
-void enable_resistencia(int enabled) {
-  gpio_set_level(RELE_RESIST_PIN, !enabled);
+void disable_motor() {
+  gpio_set_level(RELE_MOTOR_PIN, 1);
+  // ESP_LOGW(TAG, "Motor desligado");
+}
+
+void active_resist() {
+  gpio_set_level(RELE_RESIST_PIN, 0);
+}
+
+void disable_resist() {
+  gpio_set_level(RELE_RESIST_PIN, 1);
 }
 
 
@@ -191,6 +209,17 @@ unsigned long currentMilis() {
   return xTaskGetTickCount() * portTICK_RATE_MS;
 }
 
+
+int get_current_level() {
+  float prop = distData.distance / MAX_DIST;
+  int percentEspacoVazio = prop * 100;
+
+  if (percentEspacoVazio > 100) {
+    percentEspacoVazio = 100;
+  }
+  return 100 - percentEspacoVazio;
+}
+
 void display_menu() {
   char display1[16];
 
@@ -203,12 +232,8 @@ void display_menu() {
 
   char * replaceNvl[3];
   if (distData.isWorking) {
-    float prop = distData.distance / MAX_DIST;
-    int fillPercentage = prop * 100;
-    if (fillPercentage > 100) {
-      fillPercentage = 100;
-    }
-    sprintf(replaceNvl, "%i%%", fillPercentage);
+    int fillPercentage = get_current_level();
+    sprintf(replaceNvl, "%02d%%", fillPercentage);
   } else {
     strcpy(replaceNvl, "ERR");
   }
@@ -329,6 +354,24 @@ void decrease_nvl() {
 }
 
 
+
+void manage_actions() {
+  if (get_current_level() < appData.desiredNvl &&  distData.isWorking &&  get_current_level() < 95) {
+    active_motor();
+  } else {
+    disable_motor();
+  }
+
+  if (tempData.temp < appData.desiredTemp && tempData.isWorking) {
+    ESP_LOGW(TAG, "Resi ligado");
+    active_resist();
+  } else {
+    ESP_LOGW(TAG, "Resi desligado");
+    disable_resist();
+  }
+}
+
+
 void app_main() {
 
   editTemp = appData.desiredTemp;
@@ -388,10 +431,9 @@ void app_main() {
         display_edit_nvl();
         break;
       case READ:
-        // ESP_LOGI(TAG, "working: %i; temp: %i", tempData.isWorking, tempData.temp);
-        ESP_LOGI(TAG, "tempo: %d; %f", tempData.isWorking, tempData.temp);
         display_menu();
-        break;
+        manage_actions();
+          break;
     }
     vTaskDelay(100 / portTICK_PERIOD_MS);  
   }
