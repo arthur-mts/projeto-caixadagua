@@ -69,18 +69,18 @@ struct ApplicationData {
   uint32_t desiredNvl;
 };
 typedef struct ApplicationData ApplicationData;
-ApplicationData appData =  {30, 50};
+ApplicationData appData =  {30, 10};
 uint32_t editTemp;
 uint32_t editNvl;
 
 #define MAX_TEMP 90
 #define MIN_TEMP 30
 
-#define MAX_NVL 900
-#define MIN_NVL 50
+#define MAX_DIST 100
+#define MIN_DIST 10
 
 #define STEP_TEMP 10
-#define STEP_NVL 50
+#define STEP_NVL 5
 
 void IRAM_ATTR gpio_isr_handle_sw(void* arg) {
     trigou = !trigou;
@@ -97,9 +97,13 @@ void IRAM_ATTR gpio_isr_handle_echo(void* arg) {
     end_echo_time_check = esp_timer_get_time();
     float time_diff = (float) end_echo_time_check - start_echo_time_check;
     float distance = time_diff / 58.0;
-    // TODO: checar se o valor ta maior ou menor doq o limite e marcar como is working 0
-    distData.isWorking = 1;
-    distData.distance = distance;
+
+    if (distance > 400 || distance < 2) {
+      distData.isWorking = 0;
+    } else {
+      distData.isWorking = 1;
+      distData.distance = distance;
+    }
   } else {
     start_echo_time_check = esp_timer_get_time();
   }
@@ -190,21 +194,33 @@ unsigned long currentMilis() {
 void display_menu() {
   char display1[16];
 
-  char * display0 = " %iC | %iml|   ";
-  if(appData.desiredNvl >= 100) {
-    display0 = " %iC |%iml|   ";
+  char * replaceTemp[3];
+  if (tempData.isWorking) {
+    sprintf(replaceTemp, "%.0fC", tempData.temp);
+  } else {
+    strcpy(replaceTemp, "ERR");
   }
-  sprintf(display1, display0, appData.desiredTemp, appData.desiredNvl);
+
+  char * replaceNvl[3];
+  if (distData.isWorking) {
+    float prop = distData.distance / MAX_DIST;
+    int fillPercentage = prop * 100;
+    if (fillPercentage > 100) {
+      fillPercentage = 100;
+    }
+    sprintf(replaceNvl, "%i%%", fillPercentage);
+  } else {
+    strcpy(replaceNvl, "ERR");
+  }
+
+  sprintf(display1, " %s | %s |   ", replaceTemp, replaceNvl);
   write_on_lcd("TEMP | NVL | RD", 0);
   write_on_lcd(display1, 1);
 }
 
 void display_edit_nvl() {
   char display1[16];
-  char * display0 = "     | %iml|   ";
-  if(editNvl >= 100) {
-    display0 = "     |%iml|   ";
-  }
+  char * display0 = "     | %i%% |   ";
   sprintf(display1, display0, editNvl);
   write_on_lcd("     | NVL |   ", 0);
   write_on_lcd(display1, 1);
@@ -300,14 +316,14 @@ void decrease_temp() {
 void increase_nvl() {
   uint32_t new_nvl = editNvl + STEP_NVL;
 
-  if (new_nvl <= MAX_NVL && new_nvl >= MIN_NVL) {
+  if (new_nvl <= MAX_DIST && new_nvl >= MIN_DIST) {
     editNvl = new_nvl;
   }
 }
 
 void decrease_nvl() {
   uint32_t new_nvl = editNvl - STEP_NVL;
-    if (new_nvl <= MAX_NVL && new_nvl >= MIN_NVL) {
+    if (new_nvl <= MAX_DIST && new_nvl >= MIN_DIST) {
     editNvl = new_nvl;
   }
 }
@@ -372,6 +388,8 @@ void app_main() {
         display_edit_nvl();
         break;
       case READ:
+        // ESP_LOGI(TAG, "working: %i; temp: %i", tempData.isWorking, tempData.temp);
+        ESP_LOGI(TAG, "tempo: %d; %f", tempData.isWorking, tempData.temp);
         display_menu();
         break;
     }
